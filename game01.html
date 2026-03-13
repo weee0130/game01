@@ -3,17 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D GLB 模型預覽器</title>
-    <!-- 引入 Three.js 核心庫 -->
+    <title>智慧交互 3D 模型預覽器</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <!-- 引入軌道控制器與 GLTF 載入器 -->
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
-    <!-- 使用 Tailwind CSS 進行快速 UI 佈局 -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/FBXLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/ColladaLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/fflate@0.7.4/umd/index.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { margin: 0; background-color: #111; overflow: hidden; }
-        #canvas-container { width: 100vw; height: 100vh; cursor: move; }
+        #canvas-container { width: 100vw; height: 100vh; }
         .ui-panel { position: absolute; top: 20px; left: 20px; z-index: 10; pointer-events: none; }
         .ui-element { pointer-events: auto; }
         #drop-zone {
@@ -27,20 +29,18 @@
 </head>
 <body>
 
-    <!-- 拖曳上傳提示區 -->
     <div id="drop-zone" class="text-white text-3xl font-bold backdrop-blur-sm">
         放開滑鼠以上傳模型
     </div>
 
-    <!-- UI 面板 -->
     <div class="ui-panel space-y-4">
         <div class="ui-element bg-white/10 backdrop-blur-md p-6 rounded-2xl border border-white/20 shadow-2xl max-w-sm">
-            <h1 class="text-white text-xl font-bold mb-2">3D 模型預覽器</h1>
-            <p class="text-gray-300 text-sm mb-4">支援 GLB / GLTF 格式</p>
+            <h1 class="text-white text-xl font-bold mb-2">智慧交互 3D 預覽器</h1>
+            <p class="text-gray-300 text-sm mb-4">支援 GLB, OBJ, STL, FBX, DAE</p>
             
             <label class="block">
                 <span class="sr-only">選擇模型</span>
-                <input type="file" id="file-input" accept=".glb,.gltf" 
+                <input type="file" id="file-input" accept=".glb,.gltf,.obj,.stl,.fbx,.dae" 
                     class="block w-full text-sm text-gray-400
                     file:mr-4 file:py-2 file:px-4
                     file:rounded-full file:border-0
@@ -49,154 +49,220 @@
                     hover:file:bg-blue-700 cursor-pointer">
             </label>
 
-            <!-- 載入中動畫 -->
             <div id="loading" class="mt-4 flex items-center space-x-2 text-blue-400">
                 <svg class="animate-spin h-5 w-5" viewBox="0 0 24 24">
                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
                     <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
-                <span>正在加載 3D 模型...</span>
+                <span>模型加載中...</span>
             </div>
         </div>
 
-        <!-- 操作說明 -->
         <div class="ui-element bg-black/40 backdrop-blur-sm p-4 rounded-xl border border-white/10 text-white text-xs">
-            <p class="mb-1 font-bold text-gray-400">操作指南</p>
-            <p>● 滑鼠左鍵：旋轉模型</p>
-            <p>● 滑鼠滾輪：縮放大小</p>
-            <p>● 滑鼠右鍵：平移相機</p>
+            <p class="mb-1 font-bold text-blue-400">全新交互模式</p>
+            <p>● <span class="text-yellow-400">移至物體上</span>：拖拽旋轉「物體本身」</p>
+            <p>● <span class="text-yellow-400">移至空白處</span>：旋轉、縮放「攝影機視角」</p>
         </div>
     </div>
 
-    <!-- 渲染容器 -->
     <div id="canvas-container"></div>
 
     <script>
         let scene, camera, renderer, controls, currentModel;
+        let raycaster, mouse;
+        let isHoveringModel = false;
+        let isDragging = false;
+        let previousMousePosition = { x: 0, y: 0 };
 
         function init() {
-            // 1. 初始化場景
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x1a1a1a);
+            scene.background = new THREE.Color(0x111111);
 
-            // 2. 初始化相機
-            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-            camera.position.set(5, 5, 5);
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 2000);
+            camera.position.set(10, 10, 10);
 
-            // 3. 初始化渲染器
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.outputEncoding = THREE.sRGBEncoding;
-            renderer.shadowMap.enabled = true;
             document.getElementById('canvas-container').appendChild(renderer.domElement);
 
-            // 4. 控制器 (OrbitControls)
+            // 初始化控制器
             controls = new THREE.OrbitControls(camera, renderer.domElement);
             controls.enableDamping = true;
             controls.dampingFactor = 0.05;
 
-            // 5. 燈光設置
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            // 燈光
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
             scene.add(ambientLight);
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(10, 10, 10);
+            scene.add(dirLight);
 
-            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-            directionalLight.position.set(5, 10, 7);
-            directionalLight.castShadow = true;
-            scene.add(directionalLight);
+            scene.add(new THREE.GridHelper(50, 50, 0x333333, 0x222222));
 
-            const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.4);
-            scene.add(hemiLight);
+            // 初始化光線投射
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
 
-            // 6. 輔助網格
-            const grid = new THREE.GridHelper(20, 20, 0x444444, 0x222222);
-            scene.add(grid);
+            // 事件監聽
+            window.addEventListener('mousemove', onMouseMove);
+            window.addEventListener('mousedown', onMouseDown);
+            window.addEventListener('mouseup', onMouseUp);
+            window.addEventListener('resize', onWindowResize);
 
             animate();
         }
 
-        // 動畫循環
+        function onMouseMove(event) {
+            // 更新滑鼠標準化座標 (-1 to +1)
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            checkIntersection();
+
+            // 如果正在拖拽且在物體上
+            if (isDragging && isHoveringModel && currentModel) {
+                const deltaMove = {
+                    x: event.clientX - previousMousePosition.x,
+                    y: event.clientY - previousMousePosition.y
+                };
+
+                // 旋轉物體本身
+                const rotationSpeed = 0.005;
+                currentModel.rotation.y += deltaMove.x * rotationSpeed;
+                currentModel.rotation.x += deltaMove.y * rotationSpeed;
+            }
+
+            previousMousePosition = { x: event.clientX, y: event.clientY };
+        }
+
+        function checkIntersection() {
+            if (!currentModel) return;
+
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObject(currentModel, true);
+
+            if (intersects.length > 0) {
+                isHoveringModel = true;
+                document.body.style.cursor = 'grab';
+                // 進入物體，禁用 OrbitControls 旋轉視角功能
+                controls.enableRotate = false;
+            } else {
+                isHoveringModel = false;
+                document.body.style.cursor = 'default';
+                // 離開物體，恢復視角旋轉
+                if (!isDragging) controls.enableRotate = true;
+            }
+        }
+
+        function onMouseDown(event) {
+            isDragging = true;
+            if (isHoveringModel) {
+                document.body.style.cursor = 'grabbing';
+            }
+        }
+
+        function onMouseUp() {
+            isDragging = false;
+            document.body.style.cursor = isHoveringModel ? 'grab' : 'default';
+            // 結束拖拽後，如果不在物體上，重新啟用視角旋轉
+            if (!isHoveringModel) controls.enableRotate = true;
+        }
+
         function animate() {
             requestAnimationFrame(animate);
             controls.update();
             renderer.render(scene, camera);
         }
 
-        // 處理模型讀取
-        function loadModel(url) {
+        // 載入模型邏輯
+        function loadModel(file) {
             if (currentModel) scene.remove(currentModel);
-            
             document.getElementById('loading').style.display = 'flex';
-            const loader = new THREE.GLTFLoader();
             
-            loader.load(url, (gltf) => {
-                currentModel = gltf.scene;
-                
-                // 自動居中模型
-                const box = new THREE.Box3().setFromObject(currentModel);
-                const center = box.getCenter(new THREE.Vector3());
-                const size = box.getSize(new THREE.Vector3());
-                
-                currentModel.position.x += (currentModel.position.x - center.x);
-                currentModel.position.y += (currentModel.position.y - center.y);
-                currentModel.position.z += (currentModel.position.z - center.z);
-                
-                // 根據模型大小調整相機視角與距離
-                const maxDim = Math.max(size.x, size.y, size.z);
-                const fov = camera.fov * (Math.PI / 180);
-                let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2));
-                cameraZ *= 1.8; // 給予適當緩衝空間
-                
-                camera.position.set(cameraZ, cameraZ, cameraZ);
-                camera.lookAt(0, 0, 0);
-                controls.target.set(0, 0, 0);
-                controls.update();
-
-                scene.add(currentModel);
-                document.getElementById('loading').style.display = 'none';
-            }, undefined, (error) => {
-                console.error(error);
-                alert('模型載入失敗，請確認是否為有效之 GLB 或 GLTF 檔案。');
-                document.getElementById('loading').style.display = 'none';
-            });
+            const url = URL.createObjectURL(file);
+            const extension = file.name.split('.').pop().toLowerCase();
+            
+            let loader;
+            switch(extension) {
+                case 'glb':
+                case 'gltf':
+                    loader = new THREE.GLTFLoader();
+                    loader.load(url, (gltf) => setupModel(gltf.scene), null, onError);
+                    break;
+                case 'obj':
+                    loader = new THREE.OBJLoader();
+                    loader.load(url, (obj) => setupModel(obj), null, onError);
+                    break;
+                case 'stl':
+                    loader = new THREE.STLLoader();
+                    loader.load(url, (geometry) => {
+                        const mat = new THREE.MeshPhongMaterial({ color: 0xaaaaaa, specular: 0x111111, shininess: 200 });
+                        setupModel(new THREE.Mesh(geometry, mat));
+                    }, null, onError);
+                    break;
+                case 'fbx':
+                    loader = new THREE.FBXLoader();
+                    loader.load(url, (fbx) => setupModel(fbx), null, onError);
+                    break;
+                case 'dae':
+                    loader = new THREE.ColladaLoader();
+                    loader.load(url, (collada) => setupModel(collada.scene), null, onError);
+                    break;
+                default:
+                    alert('不支援格式');
+                    document.getElementById('loading').style.display = 'none';
+            }
         }
 
-        // 監聽視窗尺寸變化
-        window.addEventListener('resize', () => {
+        function setupModel(model) {
+            currentModel = model;
+            const box = new THREE.Box3().setFromObject(currentModel);
+            const center = box.getCenter(new THREE.Vector3());
+            const size = box.getSize(new THREE.Vector3());
+            
+            currentModel.position.sub(center); // 居中
+            
+            const maxDim = Math.max(size.x, size.y, size.z);
+            const fov = camera.fov * (Math.PI / 180);
+            let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2)) * 2;
+            
+            camera.position.set(cameraZ, cameraZ, cameraZ);
+            camera.lookAt(0, 0, 0);
+            controls.target.set(0, 0, 0);
+            controls.update();
+
+            scene.add(currentModel);
+            document.getElementById('loading').style.display = 'none';
+        }
+
+        function onError(err) {
+            console.error(err);
+            document.getElementById('loading').style.display = 'none';
+        }
+
+        function onWindowResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
-        });
+        }
 
-        // 點擊選擇檔案上傳
         document.getElementById('file-input').addEventListener('change', (e) => {
             const file = e.target.files[0];
-            if (file) {
-                const url = URL.createObjectURL(file);
-                loadModel(url);
-            }
+            if (file) loadModel(file);
         });
 
-        // 拖放功能 (Drag and Drop)
+        // 拖放上傳
         const dropZone = document.getElementById('drop-zone');
-        window.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            dropZone.style.display = 'flex';
-        });
-        dropZone.addEventListener('dragleave', (e) => {
-            if (e.relatedTarget === null) dropZone.style.display = 'none';
-        });
+        window.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.style.display = 'flex'; });
+        dropZone.addEventListener('dragleave', (e) => { if (!e.relatedTarget) dropZone.style.display = 'none'; });
         dropZone.addEventListener('drop', (e) => {
             e.preventDefault();
             dropZone.style.display = 'none';
-            const file = e.dataTransfer.files[0];
-            if (file && (file.name.endsWith('.glb') || file.name.endsWith('.gltf'))) {
-                const url = URL.createObjectURL(file);
-                loadModel(url);
-            }
+            if (e.dataTransfer.files[0]) loadModel(e.dataTransfer.files[0]);
         });
 
-        // 啟動程式
         window.onload = init;
     </script>
 </body>
