@@ -2,234 +2,197 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 # 設定頁面
-st.set_page_config(page_title="經典坦克大戰", page_icon="🚜", layout="centered")
+st.set_page_config(page_title="瘋狂醫生：急診大挑戰", page_icon="🏥", layout="centered")
 
-st.title("🚜 經典坦克大戰 (Retro Tank)")
-st.write("使用 **方向鍵 (Arrow Keys)** 移動，**空白鍵 (Space)** 射擊！")
+st.title("🏥 瘋狂醫生：急診大挑戰")
+st.write("身為一名業餘醫生，你需要使用各種工具來挽救病人的生命！")
 
 # 遊戲的核心 HTML 與 JavaScript 代碼
-# 這裡使用 HTML5 Canvas 實現流暢的遊戲體驗
 game_code = """
 <!DOCTYPE html>
 <html>
 <head>
     <style>
-        body { margin: 0; background: #000; display: flex; justify-content: center; align-items: center; overflow: hidden; font-family: 'Courier New', Courier, monospace; }
-        canvas { border: 4px solid #555; background-color: #000; }
-        #ui { position: absolute; top: 10px; left: 10px; color: white; }
+        body { margin: 0; background: #222; display: flex; justify-content: center; align-items: center; overflow: hidden; font-family: 'Arial', sans-serif; cursor: crosshair; }
+        canvas { border: 5px solid #444; background-color: #f5d0b0; border-radius: 20px; box-shadow: 0 0 20px rgba(0,0,0,0.5); }
+        #ui { position: absolute; top: 10px; width: 500px; display: flex; justify-content: space-between; color: #ff0000; font-weight: bold; font-size: 20px; text-shadow: 1px 1px 2px black; pointer-events: none; }
+        #toolbar { position: absolute; bottom: 20px; display: flex; gap: 10px; background: rgba(0,0,0,0.7); padding: 10px; border-radius: 15px; }
+        .tool { width: 60px; height: 60px; background: #eee; border: 3px solid #666; border-radius: 10px; display: flex; justify-content: center; align-items: center; font-size: 30px; cursor: pointer; transition: 0.2s; }
+        .tool.active { background: #fff; border-color: #00ff00; transform: translateY(-5px); box-shadow: 0 5px 10px rgba(0,255,0,0.3); }
     </style>
 </head>
 <body>
-    <div id="ui">Score: <span id="score">0</span></div>
+    <div id="ui">
+        <div>❤️ HP: <span id="hp">100</span></div>
+        <div>⏱️ TIME: <span id="timer">60</span>s</div>
+    </div>
+    
     <canvas id="gameCanvas"></canvas>
+
+    <div id="toolbar">
+        <div class="tool active" id="tool-knife" title="手術刀 - 切開傷口">🔪</div>
+        <div class="tool" id="tool-pincer" title="鑷子 - 取出異物">✂️</div>
+        <div class="tool" id="tool-fire" title="火機 - 燒灼止血">🔥</div>
+        <div class="tool" id="tool-gel" title="癒合噴霧 - 修復皮膚">🧪</div>
+    </div>
 
     <script>
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
-        const scoreEl = document.getElementById('score');
+        const hpEl = document.getElementById('hp');
+        const timerEl = document.getElementById('timer');
 
-        // 遊戲常數
-        const TILE_SIZE = 32;
-        const ROWS = 15;
-        const COLS = 15;
-        canvas.width = COLS * TILE_SIZE;
-        canvas.height = ROWS * TILE_SIZE;
+        canvas.width = 600;
+        canvas.height = 450;
 
-        let score = 0;
-        const keys = {};
+        let hp = 100;
+        let timeLeft = 60;
+        let currentTool = 'knife';
+        let isMouseDown = false;
+        let gameActive = true;
 
-        // 地圖數據: 0:空地, 1:磚塊, 2:鋼鐵
-        const map = [
-            [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-            [0,1,1,0,1,1,0,2,0,1,1,0,1,1,0],
-            [0,1,1,0,1,1,0,2,0,1,1,0,1,1,0],
-            [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-            [0,1,1,0,2,2,0,1,0,2,2,0,1,1,0],
-            [0,0,0,0,0,0,0,1,0,0,0,0,0,0,0],
-            [2,0,1,1,0,1,1,1,1,1,0,1,1,0,2],
-            [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-            [2,0,1,1,0,1,1,0,1,1,0,1,1,0,2],
-            [0,0,0,0,0,0,0,1,0,0,0,0,0,0,0],
-            [0,1,1,0,2,2,0,1,0,2,2,0,1,1,0],
-            [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-            [0,1,1,0,1,1,0,2,0,1,1,0,1,1,0],
-            [0,1,1,0,1,1,0,0,0,1,1,0,1,1,0],
-            [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+        // 任務目標
+        let glassShards = [
+            { x: 200, y: 150, width: 40, height: 10, angle: 0.5, removed: false },
+            { x: 350, y: 250, width: 30, height: 15, angle: -0.2, removed: false },
+            { x: 250, y: 300, width: 35, height: 12, angle: 1.2, removed: false }
+        ];
+        
+        let wounds = [
+            { x1: 150, y1: 100, x2: 450, y2: 120, cut: false, healed: false, cauterized: false }
         ];
 
-        class Bullet {
-            constructor(x, y, dx, dy, owner) {
-                this.x = x;
-                this.y = y;
-                this.dx = dx;
-                this.dy = dy;
-                this.owner = owner;
-                this.radius = 3;
-                this.speed = 5;
-            }
-            update() {
-                this.x += this.dx * this.speed;
-                this.y += this.dy * this.speed;
-                
-                // 碰撞牆壁
-                let gridX = Math.floor(this.x / TILE_SIZE);
-                let gridY = Math.floor(this.y / TILE_SIZE);
-                
-                if(gridX >= 0 && gridX < COLS && gridY >= 0 && gridY < ROWS) {
-                    if(map[gridY][gridX] === 1) { // 擊中磚塊
-                        map[gridY][gridX] = 0;
-                        return false;
-                    } else if(map[gridY][gridX] === 2) { // 擊中鋼鐵
-                        return false;
+        // 切換工具
+        const tools = {
+            'knife': document.getElementById('tool-knife'),
+            'pincer': document.getElementById('tool-pincer'),
+            'fire': document.getElementById('tool-fire'),
+            'gel': document.getElementById('tool-gel')
+        };
+
+        Object.keys(tools).forEach(id => {
+            tools[id].addEventListener('click', () => {
+                Object.values(tools).forEach(t => t.classList.remove('active'));
+                tools[id].classList.add('active');
+                currentTool = id;
+            });
+        });
+
+        // 滑鼠事件
+        canvas.addEventListener('mousedown', (e) => { isMouseDown = true; handleAction(e); });
+        canvas.addEventListener('mouseup', () => isMouseDown = false);
+        canvas.addEventListener('mousemove', (e) => { if(isMouseDown) handleAction(e); });
+
+        function handleAction(e) {
+            if (!gameActive) return;
+            const rect = canvas.getBoundingClientRect();
+            const mx = e.clientX - rect.left;
+            const my = e.clientY - rect.top;
+
+            if (currentTool === 'knife') {
+                wounds.forEach(w => {
+                    if (mx > w.x1 && mx < w.x2 && Math.abs(my - w.y1) < 20) w.cut = true;
+                });
+            } else if (currentTool === 'pincer') {
+                glassShards.forEach(s => {
+                    if (!s.removed && Math.abs(mx - s.x) < 20 && Math.abs(my - s.y) < 20) {
+                        s.removed = true;
                     }
-                }
-                
-                return !(this.x < 0 || this.x > canvas.width || this.y < 0 || this.y > canvas.height);
-            }
-            draw() {
-                ctx.fillStyle = "yellow";
-                ctx.beginPath();
-                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
-                ctx.fill();
-            }
-        }
-
-        class Tank {
-            constructor(x, y, color, isPlayer) {
-                this.x = x;
-                this.y = y;
-                this.color = color;
-                this.isPlayer = isPlayer;
-                this.dir = { x: 0, y: -1 };
-                this.speed = 2;
-                this.lastShot = 0;
-            }
-            draw() {
-                ctx.fillStyle = this.color;
-                // 畫坦克主體
-                ctx.fillRect(this.x + 4, this.y + 4, TILE_SIZE - 8, TILE_SIZE - 8);
-                // 畫砲管
-                ctx.strokeStyle = this.color;
-                ctx.lineWidth = 4;
-                ctx.beginPath();
-                ctx.moveTo(this.x + TILE_SIZE/2, this.y + TILE_SIZE/2);
-                ctx.lineTo(this.x + TILE_SIZE/2 + this.dir.x * 15, this.y + TILE_SIZE/2 + this.dir.y * 15);
-                ctx.stroke();
-            }
-            move(dx, dy) {
-                this.dir = { x: dx, y: dy };
-                let nextX = this.x + dx * this.speed;
-                let nextY = this.y + dy * this.speed;
-                
-                if(!this.checkCollision(nextX, nextY)) {
-                    this.x = nextX;
-                    this.y = nextY;
-                }
-            }
-            checkCollision(nx, ny) {
-                const margin = 4;
-                const points = [
-                    {x: nx + margin, y: ny + margin},
-                    {x: nx + TILE_SIZE - margin, y: ny + margin},
-                    {x: nx + margin, y: ny + TILE_SIZE - margin},
-                    {x: nx + TILE_SIZE - margin, y: ny + TILE_SIZE - margin}
-                ];
-                for(let p of points) {
-                    let gx = Math.floor(p.x / TILE_SIZE);
-                    let gy = Math.floor(p.y / TILE_SIZE);
-                    if(gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS || map[gy][gx] !== 0) return true;
-                }
-                return false;
-            }
-            shoot() {
-                const now = Date.now();
-                if(now - this.lastShot > 500) {
-                    bullets.push(new Bullet(this.x + TILE_SIZE/2, this.y + TILE_SIZE/2, this.dir.x, this.dir.y, this));
-                    this.lastShot = now;
-                }
+                });
+            } else if (currentTool === 'fire') {
+                wounds.forEach(w => {
+                    if (w.cut && !w.cauterized && mx > w.x1 && mx < w.x2 && Math.abs(my - w.y1) < 20) w.cauterized = true;
+                });
+            } else if (currentTool === 'gel') {
+                wounds.forEach(w => {
+                    if (w.cauterized && !w.healed && mx > w.x1 && mx < w.x2 && Math.abs(my - w.y1) < 20) w.healed = true;
+                });
             }
         }
-
-        const player = new Tank(TILE_SIZE * 7, TILE_SIZE * 13, "#00ff00", true);
-        const enemies = [
-            new Tank(TILE_SIZE * 1, TILE_SIZE * 1, "#ff0000", false),
-            new Tank(TILE_SIZE * 13, TILE_SIZE * 1, "#ff0000", false)
-        ];
-        let bullets = [];
-
-        window.addEventListener('keydown', e => keys[e.code] = true);
-        window.addEventListener('keyup', e => keys[e.code] = false);
 
         function update() {
-            // 玩家控制
-            if(keys['ArrowUp']) player.move(0, -1);
-            else if(keys['ArrowDown']) player.move(0, 1);
-            else if(keys['ArrowLeft']) player.move(-1, 0);
-            else if(keys['ArrowRight']) player.move(1, 0);
+            if (!gameActive) return;
+
+            // HP 自然下降 (難度機制)
+            hp -= 0.05;
             
-            if(keys['Space']) player.shoot();
+            // 檢查未處理的異物導致流血
+            glassShards.forEach(s => { if(!s.removed) hp -= 0.02; });
 
-            // 更新子彈
-            bullets = bullets.filter(b => {
-                const active = b.update();
-                if(!active) return false;
-                
-                // 檢查是否擊中坦克
-                if(!b.owner.isPlayer && Math.abs(b.x - (player.x + TILE_SIZE/2)) < 15 && Math.abs(b.y - (player.y + TILE_SIZE/2)) < 15) {
-                    alert("遊戲結束！");
-                    location.reload();
-                    return false;
-                }
-                
-                for(let i=enemies.length-1; i>=0; i--) {
-                    let e = enemies[i];
-                    if(b.owner.isPlayer && Math.abs(b.x - (e.x + TILE_SIZE/2)) < 15 && Math.abs(b.y - (e.y + TILE_SIZE/2)) < 15) {
-                        enemies.splice(i, 1);
-                        score += 100;
-                        scoreEl.innerText = score;
-                        // 補充敵人
-                        setTimeout(() => {
-                            enemies.push(new Tank(Math.random() < 0.5 ? TILE_SIZE : TILE_SIZE*13, TILE_SIZE, "#ff0000", false));
-                        }, 2000);
-                        return false;
-                    }
-                }
-                return true;
-            });
+            if (hp <= 0) endGame(false);
+            
+            // 計時
+            if (Math.random() < 0.016) { // 大約每秒
+                timeLeft -= (1/60);
+                timerEl.innerText = Math.ceil(timeLeft);
+                if (timeLeft <= 0) endGame(false);
+            }
 
-            // 敵人 AI
-            enemies.forEach(e => {
-                if(Math.random() < 0.02) {
-                    const r = Math.random();
-                    if(r < 0.25) e.aiDir = {x:0, y:-1};
-                    else if(r < 0.5) e.aiDir = {x:0, y:1};
-                    else if(r < 0.75) e.aiDir = {x:-1, y:0};
-                    else e.aiDir = {x:1, y:0};
-                }
-                if(e.aiDir) e.move(e.aiDir.x, e.aiDir.y);
-                if(Math.random() < 0.01) e.shoot();
-            });
+            // 檢查勝出
+            if (glassShards.every(s => s.removed) && wounds.every(w => w.healed)) {
+                endGame(true);
+            }
+
+            hpEl.innerText = Math.max(0, Math.floor(hp));
         }
 
         function draw() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            
-            // 畫地圖
-            for(let r=0; r<ROWS; r++) {
-                for(let c=0; c<COLS; c++) {
-                    if(map[r][c] === 1) {
-                        ctx.fillStyle = "#a52a2a"; // 磚塊
-                        ctx.fillRect(c*TILE_SIZE+2, r*TILE_SIZE+2, TILE_SIZE-4, TILE_SIZE-4);
-                    } else if(map[r][c] === 2) {
-                        ctx.fillStyle = "#888"; // 鋼鐵
-                        ctx.fillRect(c*TILE_SIZE, r*TILE_SIZE, TILE_SIZE, TILE_SIZE);
-                    }
+            // 背景（病人腹部皮膚）
+            ctx.fillStyle = '#f5d0b0';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // 畫傷口
+            wounds.forEach(w => {
+                ctx.beginPath();
+                ctx.lineWidth = 10;
+                ctx.lineCap = 'round';
+                if (!w.cut) {
+                    ctx.strokeStyle = 'rgba(255,0,0,0.3)'; // 切割虛線
+                    ctx.setLineDash([10, 5]);
+                } else if (!w.cauterized) {
+                    ctx.strokeStyle = '#800'; // 鮮紅傷口
+                    ctx.setLineDash([]);
+                } else if (!w.healed) {
+                    ctx.strokeStyle = '#421'; // 焦黑傷口
+                    ctx.setLineDash([]);
+                } else {
+                    ctx.strokeStyle = 'rgba(255,255,255,0.5)'; // 癒合疤痕
+                    ctx.setLineDash([]);
                 }
+                ctx.moveTo(w.x1, w.y1);
+                ctx.lineTo(w.x2, w.y2);
+                ctx.stroke();
+            });
+
+            // 畫異物 (玻璃)
+            glassShards.forEach(s => {
+                if (s.removed) return;
+                ctx.save();
+                ctx.translate(s.x, s.y);
+                ctx.rotate(s.angle);
+                ctx.fillStyle = 'rgba(200,230,255,0.7)';
+                ctx.strokeStyle = 'white';
+                ctx.beginPath();
+                ctx.moveTo(-s.width/2, -s.height/2);
+                ctx.lineTo(s.width/2, 0);
+                ctx.lineTo(-s.width/2, s.height/2);
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+                ctx.restore();
+            });
+
+            // 如果是在燒灼或噴藥，畫出粒子特效（簡單版）
+            if (isMouseDown) {
+                const rect = canvas.getBoundingClientRect();
+                // 這裡可以加一些粒子效果，目前先省略以保持簡潔
             }
-            
-            player.draw();
-            enemies.forEach(e => e.draw());
-            bullets.forEach(b => b.draw());
+        }
+
+        function endGame(win) {
+            gameActive = false;
+            alert(win ? "恭喜！病人脫離危險了！" : "手術失敗... 病人宣告不治。");
+            location.reload();
         }
 
         function loop() {
@@ -244,15 +207,16 @@ game_code = """
 </html>
 """
 
-# 將遊戲嵌入 Streamlit
-components.html(game_code, height=550)
+# 渲染遊戲
+components.html(game_code, height=600)
 
 st.sidebar.markdown("""
-### 🎮 遊戲說明
-- **目標**：消滅所有紅色坦克。
-- **磚塊**：可以被子彈擊碎。
-- **鋼鐵**：子彈無法擊穿。
-- **控制**：
-    - 鍵盤方向鍵移動。
-    - 空白鍵發射子彈。
+### 🏥 手術指南
+1. **診斷**：觀察傷口和異物。
+2. **切開**：使用 **手術刀 🔪** 沿虛線切開。
+3. **移除**：使用 **鑷子 ✂️** 點擊移除所有玻璃碎屑。
+4. **止血**：使用 **火機 🔥** 燒灼切口直到變深色。
+5. **縫合**：使用 **噴霧 🧪** 修復皮膚。
+
+**注意**：病人的 HP 會隨時間和傷情下降，動作要快！
 """)
