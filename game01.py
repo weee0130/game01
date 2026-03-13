@@ -15,7 +15,7 @@ game_code = """
     <meta charset="UTF-8">
     <style>
         body { margin: 0; background: #000; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #fff; }
-        #loading-screen { position: absolute; width: 100%; height: 100%; background: #111; display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100; }
+        #loading-screen { position: absolute; width: 100%; height: 100%; background: #111; display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100; transition: opacity 0.5s; }
         #hud { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; padding: 20px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; z-index: 50; }
         .stat-bar { width: 200px; height: 12px; background: rgba(0,0,0,0.5); border: 1px solid #555; margin-bottom: 5px; position: relative; }
         .bar-fill { height: 100%; transition: width 0.3s; }
@@ -36,7 +36,7 @@ game_code = """
     <div id="loading-screen">
         <h1>WASTELAND SURVIVAL</h1>
         <p>正在加載末日場景與 AI 系統...</p>
-        <div class="stat-bar" style="width: 300px;"><div id="load-bar" class="bar-fill" style="width: 0%; background: #fff;"></div></div>
+        <div class="stat-bar" style="width: 300px;"><div id="load-bar" class="bar-fill" style="width: 100%; background: #fff;"></div></div>
     </div>
 
     <div id="hud">
@@ -70,22 +70,29 @@ game_code = """
         let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false, canJump = false;
         let objects = [], enemies = [];
         let raycaster = new THREE.Raycaster();
-        let mouse = new THREE.Vector2();
 
         // 啟動流程
         window.onload = () => {
             init();
             setupEnvironment();
             setupPlayer();
-            spawnEnemies(5);
-            document.getElementById('loading-screen').style.display = 'none';
+            spawnEnemies(8);
+            
+            // 延遲移除載入畫面確保渲染已準備好
+            setTimeout(() => {
+                document.getElementById('loading-screen').style.opacity = '0';
+                setTimeout(() => {
+                    document.getElementById('loading-screen').style.display = 'none';
+                }, 500);
+            }, 1000);
+            
             animate();
         };
 
         function init() {
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x050505);
-            scene.fog = new THREE.FogExp2(0x050505, 0.08);
+            scene.fog = new THREE.FogExp2(0x050505, 0.05);
 
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
             clock = new THREE.Clock();
@@ -96,10 +103,10 @@ game_code = """
             renderer.shadowMap.enabled = true;
             document.body.appendChild(renderer.domElement);
 
-            const ambientLight = new THREE.AmbientLight(0x404040, 1);
+            const ambientLight = new THREE.AmbientLight(0x404040, 0.8);
             scene.add(ambientLight);
 
-            const moonLight = new THREE.DirectionalLight(0x4444ff, 0.5);
+            const moonLight = new THREE.DirectionalLight(0x4444ff, 0.6);
             moonLight.position.set(50, 100, 50);
             scene.add(moonLight);
 
@@ -111,39 +118,48 @@ game_code = """
             });
             document.addEventListener('mousemove', onMouseMove);
             document.addEventListener('mousedown', shoot);
+            window.addEventListener('resize', onWindowResize);
         }
 
         function setupEnvironment() {
-            // 地面 - 使用噪點紋理模擬荒地
-            const floorGeom = new THREE.PlaneGeometry(1000, 1000, 50, 50);
+            // 地面
+            const floorGeom = new THREE.PlaneGeometry(1000, 1000);
             floorGeom.rotateX(-Math.PI / 2);
-            const floorMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 1 });
+            const floorMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.9 });
             const floor = new THREE.Mesh(floorGeom, floorMat);
             floor.receiveShadow = true;
             scene.add(floor);
 
-            // 生成廢墟建物
+            // 生成廢墟建物 - 修正了 .append 為 .push
             for (let i = 0; i < 40; i++) {
-                const h = Math.random() * 20 + 5;
-                const buildingGeom = new THREE.BoxGeometry(10, h, 10);
-                const buildingMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
+                const h = Math.random() * 25 + 5;
+                const w = Math.random() * 8 + 5;
+                const buildingGeom = new THREE.BoxGeometry(w, h, w);
+                const buildingMat = new THREE.MeshStandardMaterial({ color: 0x2a2a2a });
                 const building = new THREE.Mesh(buildingGeom, buildingMat);
                 building.position.set(Math.random() * 400 - 200, h/2, Math.random() * 400 - 200);
                 building.castShadow = true;
                 building.receiveShadow = true;
                 scene.add(building);
-                objects.append(building);
+                objects.push(building); // 修正語法
             }
         }
 
         function setupPlayer() {
-            camera.position.set(0, 1.7, 0); // 眼睛高度
+            camera.position.set(0, 1.7, 0); 
         }
 
         function spawnEnemies(count) {
             for (let i = 0; i < count; i++) {
                 const enemy = createZombie();
-                enemy.position.set(Math.random() * 60 - 30, 0, Math.random() * 60 - 30);
+                // 避開起始點
+                let x, z;
+                do {
+                    x = Math.random() * 100 - 50;
+                    z = Math.random() * 100 - 50;
+                } while (Math.abs(x) < 10 && Math.abs(z) < 10);
+                
+                enemy.position.set(x, 0, z);
                 enemies.push(enemy);
                 scene.add(enemy);
             }
@@ -152,26 +168,32 @@ game_code = """
         function createZombie() {
             const group = new THREE.Group();
             // 身體
-            const body = new THREE.Mesh(new THREE.BoxGeometry(0.6, 1.5, 0.4), new THREE.MeshStandardMaterial({ color: 0x445544 }));
+            const body = new THREE.Mesh(new THREE.BoxGeometry(0.6, 1.5, 0.4), new THREE.MeshStandardMaterial({ color: 0x3d4d3d }));
             body.position.y = 0.75;
             group.add(body);
-            // 頭部 (帶發光眼睛)
-            const head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.4), new THREE.MeshStandardMaterial({ color: 0x333333 }));
+            // 頭部
+            const head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.4), new THREE.MeshStandardMaterial({ color: 0x2a2a2a }));
             head.position.y = 1.7;
             group.add(head);
             
-            const eyeGeom = new THREE.BoxGeometry(0.05, 0.05, 0.05);
+            const eyeGeom = new THREE.BoxGeometry(0.08, 0.08, 0.08);
             const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
             const eyeL = new THREE.Mesh(eyeGeom, eyeMat);
-            eyeL.position.set(-0.1, 1.75, 0.2);
+            eyeL.position.set(-0.12, 1.75, 0.2);
             group.add(eyeL);
             const eyeR = eyeL.clone();
-            eyeR.position.x = 0.1;
+            eyeR.position.x = 0.12;
             group.add(eyeR);
 
             group.state = 'IDLE';
             group.hp = 100;
             return group;
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
         function onMouseMove(event) {
@@ -204,11 +226,11 @@ game_code = """
         function shoot() {
             if (document.pointerLockElement !== document.body) return;
             
-            // 槍口火焰特效
-            const flash = new THREE.PointLight(0xffff00, 2, 5);
+            // 槍口火焰
+            const flash = new THREE.PointLight(0xffaa00, 3, 10);
             flash.position.copy(camera.position);
             scene.add(flash);
-            setTimeout(() => scene.remove(flash), 50);
+            setTimeout(() => scene.remove(flash), 40);
 
             // 射線檢測
             raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
@@ -223,7 +245,7 @@ game_code = """
                     if (target.hp <= 0) {
                         scene.remove(target);
                         enemies = enemies.filter(e => e !== target);
-                        spawnEnemies(1); // 補位
+                        spawnEnemies(1);
                     }
                 }
             }
@@ -233,21 +255,24 @@ game_code = """
             enemies.forEach(zombie => {
                 const dist = zombie.position.distanceTo(camera.position);
                 
-                // 簡單 AI 狀態機
-                if (dist < 15) {
+                if (dist < 20) {
                     zombie.state = 'CHASE';
                     zombie.lookAt(camera.position.x, 0, camera.position.z);
                     const dir = new THREE.Vector3().subVectors(camera.position, zombie.position).normalize();
-                    zombie.position.addScaledVector(dir, 1.5 * delta);
+                    zombie.position.addScaledVector(dir, 2.0 * delta);
                     
-                    if (dist < 1.5) {
-                        player.hp -= 0.5;
-                        document.getElementById('hp-fill').style.width = player.hp + '%';
-                        if (player.hp <= 0) location.reload();
+                    if (dist < 1.6) {
+                        player.hp -= 10 * delta;
+                        document.getElementById('hp-fill').style.width = Math.max(0, player.hp) + '%';
+                        if (player.hp <= 0) {
+                           document.getElementById('message').innerText = "你已死亡！重新啟動中...";
+                           document.getElementById('message').style.display = 'block';
+                           setTimeout(() => location.reload(), 2000);
+                        }
                     }
                 } else {
                     zombie.state = 'IDLE';
-                    zombie.rotation.y += delta;
+                    zombie.rotation.y += delta * 0.5;
                 }
             });
         }
@@ -256,7 +281,7 @@ game_code = """
             requestAnimationFrame(animate);
             const delta = clock.getDelta();
 
-            // 玩家物理
+            // 玩家移動物理
             player.velocity.x -= player.velocity.x * 10.0 * delta;
             player.velocity.z -= player.velocity.z * 10.0 * delta;
             player.velocity.y -= 9.8 * 2.0 * delta; // 重力
@@ -265,8 +290,8 @@ game_code = """
             player.direction.x = Number(moveRight) - Number(moveLeft);
             player.direction.normalize();
 
-            if (moveForward || moveBackward) player.velocity.z -= player.direction.z * 100.0 * delta;
-            if (moveLeft || moveRight) player.velocity.x -= player.direction.x * 100.0 * delta;
+            if (moveForward || moveBackward) player.velocity.z -= player.direction.z * 120.0 * delta;
+            if (moveLeft || moveRight) player.velocity.x -= player.direction.x * 120.0 * delta;
 
             camera.translateX(-player.velocity.x * delta);
             camera.translateZ(player.velocity.z * delta);
@@ -294,8 +319,8 @@ st.sidebar.header("🕹️ 遊戲核心系統")
 st.sidebar.write("這是一個展示大型遊戲架構的小型實作。")
 
 col1, col2 = st.sidebar.columns(2)
-col1.metric("實體數量", "50+", "AI 運算中")
-col2.metric("渲染引擎", "WebGL 2", "144 FPS")
+col1.metric("實體數量", str(len(st.session_state.get('enemy_count', [0]*8))), "AI 運算中")
+col2.metric("渲染引擎", "WebGL 2", "穩定")
 
 st.sidebar.markdown("""
 ### 操作手冊
@@ -304,10 +329,8 @@ st.sidebar.markdown("""
 - **左鍵**：射擊
 - **空白鍵**：跳躍
 
-### 架構說明
-這類專案在實際開發中會拆分成數十個模組：
-1. `PhysicsManager.js`
-2. `AIBrain.js`
-3. `UIManager.js`
-4. `WorldGenerator.js`
+### 修正說明
+- 修正了 `objects.append` 為 `objects.push` (JS 語法)。
+- 優化了載入畫面的淡出效果。
+- 增加了受傷後的死亡訊息提示。
 """)
