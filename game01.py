@@ -2,263 +2,233 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 # 設定頁面與風格
-st.set_page_config(page_title="DaVinci Surgery Sim", page_icon="🦾", layout="centered")
+st.set_page_config(page_title="DaVinci 3D Extreme", page_icon="🔬", layout="wide")
 
-st.title("🦾 達文西微創手術中心")
-st.caption("Da Vinci Surgical System - Gastroenterology Dept.")
+st.title("🔬 達文西 3D 微創手術終端")
+st.caption("Da Vinci Surgical System v4.0 - Next-Gen 3D Rendering Engine")
 
-# 嵌入 HTML5 / JavaScript 遊戲引擎
+# 嵌入 Three.js 與 JavaScript 遊戲引擎
 game_code = """
 <!DOCTYPE html>
 <html>
 <head>
     <style>
-        body { margin: 0; background: #050505; color: #00ff41; font-family: 'Share Tech Mono', monospace; display: flex; justify-content: center; align-items: center; overflow: hidden; }
-        /* 背景改為更具腸胃道感的放射狀漸層 (深粉紅到暗紅) */
-        canvas { background: radial-gradient(circle, #4d0a0a 0%, #1a0202 100%); border: 2px solid #00ff41; border-radius: 10px; cursor: none; }
-        #overlay { position: absolute; top: 20px; width: 580px; display: flex; justify-content: space-between; pointer-events: none; z-index: 100; font-size: 14px; text-shadow: 0 0 5px #00ff41; }
-        #info-panel { position: absolute; bottom: 80px; width: 580px; text-align: center; pointer-events: none; opacity: 0.9; font-size: 14px; color: #ffeb3b; }
-        .hud-line { position: absolute; width: 100%; height: 1px; background: rgba(0,255,65,0.2); pointer-events: none; }
+        body { margin: 0; background: #000; overflow: hidden; font-family: 'Share Tech Mono', monospace; }
+        #ui-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
+        #hud-top { position: absolute; top: 20px; left: 20px; right: 20px; display: flex; justify-content: space-between; color: #00ff41; text-shadow: 0 0 10px #00ff41; }
+        #hud-bottom { position: absolute; bottom: 20px; width: 100%; text-align: center; color: #ffeb3b; }
+        .crosshair { position: absolute; top: 50%; left: 50%; width: 40px; height: 40px; border: 1px solid rgba(0,255,65,0.5); border-radius: 50%; transform: translate(-50%, -50%); }
+        .crosshair::before { content: ''; position: absolute; top: 50%; left: -10px; width: 10px; height: 1px; background: #00ff41; }
+        .crosshair::after { content: ''; position: absolute; left: 50%; top: -10px; width: 1px; height: 10px; background: #00ff41; }
     </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
-    <div id="overlay">
-        <div>STATUS: GASTRO_SCOPING</div>
-        <div>ARM_SYNC: 100%</div>
-        <div>TISSUE_TEMP: 37.2°C</div>
+    <div id="ui-container">
+        <div id="hud-top">
+            <div>[ SYSTEM: 3D_GASTRO_SCAN ]</div>
+            <div id="timer-display">SYNCING...</div>
+            <div id="score-display">REMOVED: 0</div>
+        </div>
+        <div class="crosshair"></div>
+        <div id="hud-bottom">>> 偵測到 3D 空間異物，判斷深度後進行夾取 <<</div>
     </div>
-    
-    <div id="info-panel">>> 等待異物浮現... <<</div>
-    
-    <canvas id="gameCanvas"></canvas>
 
     <script>
-        const canvas = document.getElementById('gameCanvas');
-        const ctx = canvas.getContext('2d');
-        const infoPanel = document.getElementById('info-panel');
-        canvas.width = 600;
-        canvas.height = 450;
-
-        let mouseX = 300, mouseY = 225;
-        let isClicking = false;
+        let scene, camera, renderer;
+        let arms = [], bug, particles;
+        let mouse = new THREE.Vector2();
         let score = 0;
+        let lastBugTime = Date.now();
         let gameActive = true;
+        let raycaster = new THREE.Raycaster();
 
-        // 腸胃道背景細節 (血管感)
-        const veins = [];
-        for(let i=0; i<5; i++) {
-            veins.push({
-                x1: Math.random()*600, y1: Math.random()*450,
-                x2: Math.random()*600, y2: Math.random()*450
+        window.onload = function() {
+            init();
+            animate();
+        };
+
+        function init() {
+            // 1. Scene & Camera
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x1a0202, 0.05);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.z = 5;
+
+            // 2. Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setClearColor(0x1a0202);
+            document.body.appendChild(renderer.domElement);
+
+            // 3. Lighting (手術燈效果)
+            const spotLight = new THREE.SpotLight(0xffffff, 2);
+            spotLight.position.set(0, 5, 5);
+            spotLight.angle = Math.PI / 4;
+            spotLight.penumbra = 0.1;
+            scene.add(spotLight);
+
+            const ambientLight = new THREE.AmbientLight(0x400000, 1);
+            scene.add(ambientLight);
+
+            // 4. Gastro Tunnel (腸道背景)
+            const tunnelGeom = new THREE.CylinderGeometry(5, 5, 100, 32, 1, true);
+            const tunnelMat = new THREE.MeshPhongMaterial({ 
+                color: 0x881111, 
+                side: THREE.BackSide,
+                shininess: 50,
+                bumpScale: 0.1
             });
+            const tunnel = new THREE.Mesh(tunnelGeom, tunnelMat);
+            tunnel.rotation.x = Math.PI / 2;
+            scene.add(tunnel);
+
+            // 5. Robotic Arms
+            function createArm(xOffset) {
+                const group = new THREE.Group();
+                const baseGeom = new THREE.BoxGeometry(0.2, 0.2, 5);
+                const baseMat = new THREE.MeshStandardMaterial({ color: 0x444444, metalness: 0.8 });
+                const armMesh = new THREE.Mesh(baseGeom, baseMat);
+                armMesh.position.z = 2.5;
+                group.add(armMesh);
+
+                const clawGeom = new THREE.ConeGeometry(0.1, 0.3, 4);
+                const clawMat = new THREE.MeshStandardMaterial({ color: 0x00ff41 });
+                const claw = new THREE.Mesh(clawGeom, clawMat);
+                claw.rotation.x = -Math.PI / 2;
+                claw.position.z = 5;
+                group.add(claw);
+
+                group.position.x = xOffset;
+                group.position.y = -2;
+                scene.add(group);
+                return group;
+            }
+            arms.push(createArm(-1.5));
+            arms.push(createArm(1.5));
+
+            // 6. The Bug (3D Parasite)
+            const bugGeom = new THREE.SphereGeometry(0.2, 16, 16);
+            const bugMat = new THREE.MeshPhongMaterial({ color: 0x7fff00, emissive: 0x224400 });
+            bug = new THREE.Mesh(bugGeom, bugMat);
+            bug.visible = false;
+            scene.add(bug);
+
+            // 7. Particles (微塵/血液感)
+            const pGeom = new THREE.BufferGeometry();
+            const pCoords = [];
+            for(let i=0; i<500; i++) {
+                pCoords.push(Math.random()*20-10, Math.random()*20-10, Math.random()*20-10);
+            }
+            pGeom.setAttribute('position', new THREE.Float32BufferAttribute(pCoords, 3));
+            const pMat = new THREE.PointsMaterial({ color: 0xaa0000, size: 0.05 });
+            particles = new THREE.Points(pGeom, pMat);
+            scene.add(particles);
+
+            window.addEventListener('mousemove', onMouseMove);
+            window.addEventListener('mousedown', onMouseDown);
+            window.addEventListener('resize', onWindowResize);
         }
 
-        // 寄生蟲邏輯：10秒一個週期，隨機出現2秒
-        class Parasite {
-            constructor() {
-                this.cycleDuration = 10000; // 10秒一個週期
-                this.appearDuration = 2000; // 出現2秒
-                this.lastCycleStart = Date.now();
-                this.appearOffset = Math.random() * (this.cycleDuration - this.appearDuration);
-                this.reset();
-                this.visible = false;
-                this.caughtThisCycle = false;
-            }
-            reset() {
-                this.x = Math.random() * 300 + 150;
-                this.y = Math.random() * 200 + 100;
-                this.vx = (Math.random() - 0.5) * 1.5;
-                this.vy = (Math.random() - 0.5) * 1.5;
-                this.size = 18;
-            }
-            update() {
-                const now = Date.now();
-                const elapsedInCycle = (now - this.lastCycleStart) % this.cycleDuration;
-
-                // 判斷是否在出現時間窗內
-                if (elapsedInCycle >= this.appearOffset && elapsedInCycle <= this.appearOffset + this.appearDuration) {
-                    if (!this.visible && !this.caughtThisCycle) {
-                        this.visible = true;
-                        this.reset(); // 每次出現換個位置
-                        infoPanel.innerText = "!! 偵測到活動：立刻夾取 !!";
-                        infoPanel.style.color = "#f44336";
-                    }
-                } else {
-                    // 如果出現時間結束且沒夾到，且剛剛是可見狀態 -> 失敗
-                    if (this.visible && !this.caughtThisCycle) {
-                        this.failGame();
-                    }
-                    this.visible = false;
-                    this.caughtThisCycle = false; // 重置週期抓取狀態
-                    infoPanel.innerText = ">> 掃描組織中... <<";
-                    infoPanel.style.color = "#ffeb3b";
-                }
-
-                if (this.visible) {
-                    this.x += this.vx;
-                    this.y += this.vy;
-                }
-            }
-            draw() {
-                if (!this.visible) return;
-                
-                // 畫蟲 (更長更像腸道蟲)
-                ctx.fillStyle = '#7FFF00'; // 亮綠色對比紅色背景
-                ctx.beginPath();
-                ctx.ellipse(this.x, this.y, this.size, this.size/3, Math.atan2(this.vy, this.vx), 0, Math.PI*2);
-                ctx.fill();
-                
-                // 節點細節
-                ctx.strokeStyle = '#458b00';
-                ctx.lineWidth = 2;
-                ctx.beginPath();
-                ctx.arc(this.x, this.y, 4, 0, Math.PI*2);
-                ctx.stroke();
-            }
-            failGame() {
-                gameActive = false;
-                alert("任務失敗：寄生蟲已鑽入組織深處！");
-                location.reload();
-            }
+        function onMouseMove(event) {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
         }
 
-        const bug = new Parasite();
+        function onMouseDown() {
+            if (!gameActive || !bug.visible) return;
 
-        class RobotArm {
-            constructor(baseX, isRight) {
-                this.baseX = baseX;
-                this.baseY = 450;
-                this.isRight = isRight;
-            }
-            draw(targetX, targetY) {
-                ctx.strokeStyle = '#555';
-                ctx.lineWidth = 10;
-                ctx.beginPath();
-                ctx.moveTo(this.baseX, this.baseY);
-                let midX = (this.baseX + targetX) / 2 + (this.isRight ? -40 : 40);
-                let midY = (this.baseY + targetY) / 2 - 30;
-                ctx.lineTo(midX, midY);
-                ctx.stroke();
+            // 使用 Raycaster 檢測是否擊中 3D 蟲子
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObject(bug);
 
-                ctx.strokeStyle = '#aaa';
-                ctx.lineWidth = 6;
-                ctx.beginPath();
-                ctx.moveTo(midX, midY);
-                ctx.lineTo(targetX, targetY);
-                ctx.stroke();
-
-                ctx.fillStyle = '#00ff41';
-                ctx.save();
-                ctx.translate(targetX, targetY);
-                ctx.rotate(Math.atan2(targetY - midY, targetX - midX));
-                const gap = isClicking ? 1 : 14;
-                ctx.fillRect(0, -3, 18, 3);
-                ctx.beginPath();
-                ctx.moveTo(12, -3); ctx.lineTo(22, -gap);
-                ctx.moveTo(12, 3); ctx.lineTo(22, gap);
-                ctx.stroke();
-                ctx.restore();
+            if (intersects.length > 0) {
+                score++;
+                bug.visible = false;
+                document.getElementById('score-display').innerText = `REMOVED: ${score}`;
             }
         }
 
-        const armL = new RobotArm(-20, false);
-        const armR = new RobotArm(620, true);
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
 
-        canvas.onmousemove = (e) => {
-            const rect = canvas.getBoundingClientRect();
-            mouseX = e.clientX - rect.left;
-            mouseY = e.clientY - rect.top;
-        };
-
-        canvas.onmousedown = () => {
-            if (!gameActive) return;
-            isClicking = true;
-            if (bug.visible) {
-                let dL = Math.hypot(bug.x - mouseX, bug.y - mouseY);
-                let dR = Math.hypot(bug.x - (600 - mouseX), bug.y - mouseY);
-                if(dL < 30 || dR < 30) {
-                    score += 1;
-                    bug.visible = false;
-                    bug.caughtThisCycle = true;
-                    infoPanel.innerText = "SUCCESS: 目標已移除！";
-                }
-            }
-        };
-        canvas.onmouseup = () => isClicking = false;
-
-        function drawHUD() {
-            // 十字準星
-            ctx.strokeStyle = 'rgba(0, 255, 65, 0.4)';
-            ctx.beginPath();
-            ctx.moveTo(mouseX, 0); ctx.lineTo(mouseX, 450);
-            ctx.moveTo(0, mouseY); ctx.lineTo(600, mouseY);
-            ctx.stroke();
-
-            // 數據顯示
-            ctx.fillStyle = '#00ff41';
-            ctx.font = '12px Share Tech Mono';
-            ctx.fillText(`CAPTURE_COUNT: ${score}`, 480, 430);
-            
-            // 繪製計時條 (顯示10秒週期的進度)
+        function updateGameLogic() {
             const now = Date.now();
-            const elapsed = (now - bug.lastCycleStart) % bug.cycleDuration;
-            ctx.fillStyle = 'rgba(0, 255, 65, 0.2)';
-            ctx.fillRect(150, 425, 300, 5);
-            ctx.fillStyle = '#00ff41';
-            ctx.fillRect(150, 425, (elapsed/bug.cycleDuration)*300, 5);
+            const cycleTime = 10000;
+            const appearTime = 2500;
+            const elapsed = (now - lastBugTime) % cycleTime;
+
+            if (elapsed < appearTime) {
+                if (!bug.visible) {
+                    bug.visible = true;
+                    bug.position.set(Math.random()*4-2, Math.random()*2-1, -Math.random()*5-2);
+                    document.getElementById('hud-bottom').innerText = "!! 警報：發現寄生蟲，鎖定目標中 !!";
+                }
+                // 蟲子 3D 動態
+                bug.position.x += Math.sin(now/500)*0.01;
+                bug.position.y += Math.cos(now/500)*0.01;
+            } else {
+                if (bug.visible) {
+                    bug.visible = false;
+                    // 如果消失時沒抓到且不是因為被抓，可以設定失敗邏輯
+                }
+                document.getElementById('hud-bottom').innerText = ">> 掃描 3D 組織層面中... <<";
+            }
+
+            document.getElementById('timer-display').innerText = `NEXT_WAVE: ${((cycleTime-elapsed)/1000).toFixed(1)}s`;
         }
 
-        function loop() {
+        function animate() {
             if (!gameActive) return;
-            ctx.clearRect(0, 0, 600, 450);
+            requestAnimationFrame(animate);
+
+            updateGameLogic();
+
+            // 機械手臂平滑跟隨滑鼠
+            const targetX = mouse.x * 3;
+            const targetY = mouse.y * 2;
             
-            // 畫腸道背景細節 (微血管)
-            ctx.strokeStyle = 'rgba(255, 0, 0, 0.15)';
-            ctx.lineWidth = 3;
-            veins.forEach(v => {
-                ctx.beginPath(); ctx.moveTo(v.x1, v.y1); ctx.lineTo(v.x2, v.y2); ctx.stroke();
-            });
+            // 左手
+            arms[0].lookAt(targetX, targetY, -5);
+            // 右手 (鏡像)
+            arms[1].lookAt(-targetX, targetY, -5);
 
-            bug.update();
-            bug.draw();
+            // 粒子飄動
+            particles.rotation.z += 0.001;
+            particles.position.z += 0.01;
+            if(particles.position.z > 5) particles.position.z = 0;
 
-            armL.draw(mouseX, mouseY);
-            armR.draw(600 - mouseX, mouseY);
-
-            drawHUD();
-            requestAnimationFrame(loop);
+            renderer.render(scene, camera);
         }
-
-        loop();
     </script>
 </body>
 </html>
 """
 
-# 使用 Streamlit Component 渲染
-components.html(game_code, height=520)
+# 使用 Streamlit Component 渲染，設定 height=700 展現華麗感
+components.html(game_code, height=700)
 
-# 側邊欄與說明
+# 側邊欄與醫學數據
 with st.sidebar:
-    st.header("遠端手術系統")
-    st.error("⚠️ 警告：腸道寄生蟲具備高度警覺性。")
-    st.info("""
-    **當前環境：腸胃道內視鏡模式**
-    
-    **任務邏輯：**
-    1. **潛伏機制**：蟲子每 10 秒出現一次。
-    2. **出現視窗**：每次僅出現 **2 秒**。
-    3. **失敗條件**：若在出現期間未成功夾取，蟲子會鑽入深處導致手術失敗。
-    
-    **操作：**
-    - 移動滑鼠控制雙臂。
-    - 點擊左鍵精準夾取。
-    """)
+    st.header("🔬 3D 內視鏡終端")
+    st.markdown("---")
+    st.write("### 系統規格")
+    st.code("Renderer: WebGL 2.0\nEngine: Three.js r128\nDepth Support: Enabled")
     
     st.divider()
-    st.write("### 醫學數據")
-    st.progress(100, "內視鏡連線中")
-    st.success("光學傳感器校準正常")
+    st.info("""
+    **3D 操作指南：**
+    - **深度感知**：蟲子現在會在 3D 空間移動，越遠看起來越小。
+    - **精準夾取**：將準星對準蟲子並點擊，系統會自動計算 3D 軌跡進行夾取。
+    - **週期提醒**：觀察左上角 NEXT_WAVE 計時。
+    """)
+    
+    if st.button("重啟系統校準"):
+        st.rerun()
 
 st.markdown("---")
-st.write("💡 **臨床筆記**：寄生蟲在受驚時會迅速逃逸。觀察畫面下方的計時條，預判蟲子可能出現的時間點。")
+st.write("💡 **開發者筆記**：這是透過 `Three.js` 實現的 GPU 加速渲染。在 GitHub 部署後，它能完美利用使用者的顯卡性能，提供極致流暢的手術體驗。")
